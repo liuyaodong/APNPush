@@ -48,7 +48,7 @@ public class PushRunnable implements Runnable {
 	public PushRunnable(final NotificationReclaimableConsumeQueue notificationQueue, final PushContext context) {
 		this.notificationQueue = notificationQueue;
 		this.context = context;
-		this.notificationCache = new SentNotificationCache(APNManager.SENT_BUFFER_CAPACITY_PER_TASK);
+		this.notificationCache = new SentNotificationCache(APNConnectionManager.SENT_BUFFER_CAPACITY_PER_TASK);
 		final PushRunnable pushRunnable = this;
 		this.bootstrap = new Bootstrap()
 							.group(context.getNioEventLoopGroup())
@@ -166,7 +166,7 @@ public class PushRunnable implements Runnable {
 			this.handlerNotificationIOError(notification.getIdentifier());
 		}
 		
-		if (this.notificationsWriten.incrementAndGet() == APNManager.BATCH_SIZE) {
+		if (this.notificationsWriten.incrementAndGet() == APNConnectionManager.BATCH_SIZE) {
 			this.notificationsWriten.set(0);
 			this.channel.flush();
 		}

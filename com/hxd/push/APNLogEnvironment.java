@@ -8,7 +8,6 @@ import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
 
-
 public class APNLogEnvironment {
 	
 	public enum APNLogLevel {
@@ -30,8 +29,7 @@ public class APNLogEnvironment {
 	}
 	
 	
-	private final String logFilePath;
-	private BufferedWriter unsentTokenBufferWriter = null;
+	private String logFilePath;
 	
 	public APNLogEnvironment() {
 		this("./");
@@ -53,7 +51,7 @@ public class APNLogEnvironment {
 		return logFilePath;
 	}
 	
-	public boolean configure(APNLogLevel logLevel) {
+	public boolean configure(final APNLogLevel logLevel) {
 		Date thisDate = new Date();
 		SimpleDateFormat dateFormat = new SimpleDateFormat("_yyyyMMdd_HHmmss");
 		
@@ -63,9 +61,9 @@ public class APNLogEnvironment {
 			System.err.println(String.format("Folder at path(%s) create failed!", folderName));
 			return false;
 		}
-		
+		this.logFilePath = folderName + "/";
 		System.setProperty(org.slf4j.impl.SimpleLogger.DEFAULT_LOG_LEVEL_KEY, logLevel.toString());
-		System.setProperty(org.slf4j.impl.SimpleLogger.LOG_FILE_KEY, folderName + "/apn.log");
+		System.setProperty(org.slf4j.impl.SimpleLogger.LOG_FILE_KEY, this.logFilePath + "apn.log");
 		return true;
 	}
 	
@@ -74,23 +72,22 @@ public class APNLogEnvironment {
 			File unsentTokenFile = new File(this.getLogFilePath() + "unsent_token.txt");
 			
 			FileWriter fw = new FileWriter(unsentTokenFile, false);
-			this.unsentTokenBufferWriter = new BufferedWriter(fw);
-			this.unsentTokenBufferWriter.newLine();
+			BufferedWriter unsentTokenBufferWriter = new BufferedWriter(fw);
+			unsentTokenBufferWriter.newLine();
 			Date logDate = new Date();
-			this.unsentTokenBufferWriter.write("=========" + logDate + "=========");
-			this.unsentTokenBufferWriter.newLine();
+			unsentTokenBufferWriter.write("=========" + logDate + "=========");
+			unsentTokenBufferWriter.newLine();
 			
 			for (APNBasicNotification pushNotification : unsentNotifications) {
-				this.unsentTokenBufferWriter.write(pushNotification.getToken());
-				this.unsentTokenBufferWriter.newLine();
+				unsentTokenBufferWriter.write(pushNotification.getToken());
+				unsentTokenBufferWriter.newLine();
 			}
 			
-			this.unsentTokenBufferWriter.write("============= end ============");
-			this.unsentTokenBufferWriter.newLine();
-			this.unsentTokenBufferWriter.close();
+			unsentTokenBufferWriter.write("============= end ============");
+			unsentTokenBufferWriter.newLine();
+			unsentTokenBufferWriter.close();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
-
 }

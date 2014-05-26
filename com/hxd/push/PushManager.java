@@ -15,15 +15,17 @@ import org.slf4j.LoggerFactory;
 import com.google.gson.Gson;
 import com.hxd.push.APNLogEnvironment.APNLogLevel;
 
-public class PushEngine implements NotificationProducerDelegate {
-	private final Logger logger = LoggerFactory.getLogger(PushEngine.class);
+public class PushManager implements NotificationProducerDelegate, PushController {
+	private final Logger logger = LoggerFactory.getLogger(PushManager.class);
 	private final APNConfiguration configuration;
-	private final APNManager apnManager;
+	private final APNConnectionManager apnConnectionManager;
+	private final APNLogEnvironment logEnvironment;
 	private final String payload;
 	
-	private PushEngine(final APNConfiguration configuration, final APNLogEnvironment logEnvironment) {
+	private PushManager(final APNConfiguration configuration, final APNLogEnvironment logEnvironment) {
 		this.logger.debug("configuration: " + configuration);
 		this.configuration = configuration;
+		this.logEnvironment = logEnvironment;
 		APNPayloadBuilder payloadBuilder = new APNPayloadBuilder().alertBody(this.configuration.getAlertBody())
 			    .badge(configuration.getBadge())
 			    .sound("Default");
@@ -33,24 +35,29 @@ public class PushEngine implements NotificationProducerDelegate {
 		this.payload = payloadBuilder.build();
 		this.logger.debug("payload: " + payload);
 		
-		APNManager manager = null;
+		APNConnectionManager apnConnectionManager = null;
 		try {
-			manager = new APNManager(this.configuration.isDebug() ? APNSEnviroment.getSandboxEnvironment() : APNSEnviroment.getProductionEnvironment(),
+			apnConnectionManager = new APNConnectionManager(this.configuration.isDebug() ? APNSEnviroment.getSandboxEnvironment() : APNSEnviroment.getProductionEnvironment(),
 									this.configuration.getPkcs12(),
 									this.configuration.getPassword(),
-									logEnvironment);
+									this);
 		} catch (KeyStoreException e) {
 			e.printStackTrace();
 		}
-		this.apnManager = manager;
+		this.apnConnectionManager = apnConnectionManager;
 	}
 	
 	private void doPush() {
-		this.apnManager.start();
-		NotificationProducer producer = new NotificationProducer(apnManager.getNotificationEnqueue(), this.configuration.getTokenFile(), this.payload, this);
+		this.apnConnectionManager.start();
+		NotificationProducer producer = new NotificationProducer(apnConnectionManager.getNotificationEnqueue(), this.configuration.getTokenFile(), this.payload, this);
 		ExecutorService producerService = Executors.newSingleThreadExecutor();
 		producerService.submit(producer);
 		producerService.shutdown();
+	}
+	
+	@Override
+	public void apnConnectionManagerDidStop() {
+		this.logEnvironment.logUnsentTokens(this.apnConnectionManager.remainNotifications());
 	}
 
 	@Override
@@ -66,7 +73,7 @@ public class PushEngine implements NotificationProducerDelegate {
 			@Override
 			public void run() {
 				System.out.println("Try to terminate");
-				apnManager.stop();
+				apnConnectionManager.stop();
 			}
 		}, 3 * 60, TimeUnit.SECONDS);
 		scheduleToTerminate.shutdown();
@@ -98,6 +105,8 @@ public class PushEngine implements NotificationProducerDelegate {
 			return;
 		}
 		
-		new PushEngine(configuration, logEnvironment).doPush();
+		new PushManager(configuration, logEnvironment).doPush();
 	}
+
+
 }
