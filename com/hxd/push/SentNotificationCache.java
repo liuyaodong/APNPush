@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
+
 // SentNotificationCache is implemented as a burn-after-querying cache whose size is defined by the capacity ivar.
 // When new notification added, if the max size is reached, the eldest notification will be discarded.
 public class SentNotificationCache {

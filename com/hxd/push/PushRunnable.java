@@ -9,10 +9,12 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.nio.AbstractNioChannel.NioUnsafe;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.MessageToByteEncoder;
+import io.netty.util.concurrent.GenericFutureListener;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,15 +35,15 @@ public class PushRunnable implements Runnable {
 
 	private static final long POLL_TIMEOUT = 50;
 	private static final TimeUnit MILLISECONDS_TIME_UNIT = TimeUnit.MILLISECONDS;
-	private static final long CLOSE_TIMEOUT = 1000;
 	
 	private final NotificationReclaimableConsumeQueue notificationQueue;
 	private final PushContext context;
 	private final Bootstrap bootstrap;
 	private final Logger logger = LoggerFactory.getLogger(PushRunnable.class);
 	private final SentNotificationCache notificationCache;
+	private final Object channelWritabilityNotifier = new Object();
 	
-	private Boolean requestTermination = false;
+	private boolean requestTermination = false;
 	private Channel channel;
 	private AtomicInteger notificationsWriten = new AtomicInteger(0);
 	
@@ -125,6 +127,17 @@ public class PushRunnable implements Runnable {
 		}
 		
 		@Override
+		public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
+			super.channelWritabilityChanged(ctx);
+			logger.info("Channel Writability Changed, writable:" + ctx.channel().isWritable());
+			synchronized (channelWritabilityNotifier) {
+				if (ctx.channel().isWritable()) {
+					channelWritabilityNotifier.notify();
+				}
+			}
+		}
+
+		@Override
 		public void exceptionCaught(final ChannelHandlerContext context, final Throwable cause) {
 			// Assume this is a temporary IO problem. Some writes will fail, but will be re-enqueued.
 			logger.error(String.format("Caught an exception. Because: %s", cause.getMessage()), cause);
@@ -140,6 +153,7 @@ public class PushRunnable implements Runnable {
 		future.await();
 		if (future.isSuccess()) {
 			this.channel = future.channel();
+			this.logger.debug(this.toString() + "Connected");
 			return true;
 		} else {
 			this.logger.error("Connect to APS error! Reason: " + future.cause().getMessage());
@@ -154,17 +168,23 @@ public class PushRunnable implements Runnable {
 			this.channel.flush();
 			return;
 		}
+
+		synchronized (this.channelWritabilityNotifier) {
+			while (!this.channel.isWritable()) {
+				this.channelWritabilityNotifier.wait();
+			}
+		}
 		
 		this.notificationCache.addNotification(notification);
-		ChannelFuture future = this.channel.write(notification);
-		future.await();
-		
-		//TODO when interrupted exception during flush data, how to deal with the last added notification
-		
-		if (!future.isSuccess()) {
-			this.logger.error("Write notification to channel error! Reason: " + future.cause().getMessage());
-			this.handlerNotificationIOError(notification.getIdentifier());
-		}
+		this.channel.write(notification).addListener(new GenericFutureListener<ChannelFuture>() {
+
+			@Override
+			public void operationComplete(ChannelFuture future) throws Exception {
+				if (!future.isSuccess()) {
+					handlerNotificationIOError(notification.getIdentifier());
+				}
+			}
+		});
 		
 		if (this.notificationsWriten.incrementAndGet() == APNConnectionManager.BATCH_SIZE) {
 			this.notificationsWriten.set(0);
@@ -174,20 +194,19 @@ public class PushRunnable implements Runnable {
 	
 	private void handlerNotificationIOError(final int failedNotificationIdentifier) {
 		SendablePushNotification cachedNotification = this.notificationCache.getAndRemoveNotificationWithIdentifier(failedNotificationIdentifier);
+		this.logger.debug("Channel handle failed IO notification id: " + failedNotificationIdentifier + " sendablenotification: " + cachedNotification);
 		this.notificationQueue.reclaimFailedNotification(cachedNotification);
-		if (!this.channel.isWritable()) {
-			this.logger.error("Channel is not writable now, maybe it's broken");
-			this.requestTermination = true;
-		}
+		this.requestTermination = true;
 	}
 	
 	private void handlerNotificationRejectedError(final RejectedNotification rejectedNotification) {
 		ArrayList<SendablePushNotification> notifications = this.notificationCache.getAllNotificationsAfterIdentifierAndPurgeCache(rejectedNotification.getIdentifier());
 		if (notifications.size() > 0) {
 			SendablePushNotification rejectedOne = notifications.get(0);
-			this.notificationQueue.reportRejectedNotification(rejectedOne);
+			this.context.reportRejectedNotification(rejectedOne.getToken(), rejectedNotification.getRejectionReason());
 			notifications.remove(0);
 			this.notificationQueue.reclaimFailedNotifications(notifications);
+			this.logger.debug(String.format("Hanlder rejected notification, reclaimed %d ", notifications.size()));
 		} else {
 			this.logger.error("Failed to find the rejected notification in SentNotificationCache");
 		}
@@ -195,20 +214,22 @@ public class PushRunnable implements Runnable {
 	}
 	
 	private synchronized void close() throws InterruptedException {
-		if (this.channel.isOpen()) {
-			this.logger.error("channel is about to close");
-			ChannelFuture future = this.channel.close();
-			future.await(PushRunnable.CLOSE_TIMEOUT, PushRunnable.MILLISECONDS_TIME_UNIT);
-			if (future.isSuccess()) {
-				this.logger.debug("Successfully closed abandoned channel.");
-				
-			} else if (future.cause() != null) {
-				this.logger.error(String.format("Failed to close abandoned channel. Because: %s", future.cause().getMessage()));
-			} else {
-				this.logger.error(String.format("Failed to close abandoned channel, with no causes returned"));
-			}
+		if (this.channel != null && this.channel.isOpen()) {
+			((NioUnsafe)this.channel.unsafe()).read(); // Temporary strategy, reference from https://github.com/relayrides/pushy/issues/6 for details.
+			this.logger.debug("channel is about to close");
+			this.channel.close();
 		} else {
-			this.logger.warn("Channel is already closed!");
+			this.logger.info("Channel is already closed!");
+		}
+		
+		this.channel.closeFuture().await();
+		if (this.channel.closeFuture().isSuccess()) {
+			this.logger.debug("Successfully closed abandoned channel.");
+			
+		} else if (this.channel.closeFuture().cause() != null) {
+			this.logger.error(String.format("Failed to close abandoned channel. Because: %s", this.channel.closeFuture().cause().getMessage()));
+		} else {
+			this.logger.error(String.format("Failed to close abandoned channel, with no causes returned"));
 		}
 	}
 	
@@ -216,19 +237,23 @@ public class PushRunnable implements Runnable {
 	public void run(){
 		boolean interrupted = false;
 		try {
-			if ( !this.connect() )
+			if ( !this.connect() ) {
 				return;
+			}
 			
+			this.logger.debug("pushRunnable ready to send" + this);
 			while (!this.requestTermination && !Thread.currentThread().isInterrupted()) {
 				SendablePushNotification notification = this.notificationQueue.pollNotification(PushRunnable.POLL_TIMEOUT, PushRunnable.MILLISECONDS_TIME_UNIT);
 				sendNotification(notification);
 			}
+			this.logger.debug("pushRunnable finish sending" + this);
 			this.close();
 		} catch (InterruptedException e) {
 			this.logger.debug("pushRunnable aborted due to InterruptedException!");
 			interrupted = Thread.interrupted();
 		} finally {
 			try {
+				this.logger.debug("pushRunnable finally close");
 				this.close();
 			} catch (InterruptedException e) {
 				// Task is going to the end, so just ignore it.

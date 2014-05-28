@@ -39,6 +39,8 @@ public class NotificationProducer implements Runnable {
 					SendablePushNotification notification = new SendablePushNotification(token, this.payload, null);
 					this.notificationEnqueue.put(notification);
 					this.notificationsProducted++;
+				} else {
+					this.logger.warn("Illegal token: " + token);
 				}
 			}
 			bufferedReader.close();

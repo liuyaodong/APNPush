@@ -19,9 +19,9 @@ import org.slf4j.LoggerFactory;
 public class APNConnectionManager implements PushContext {
 	
 	public static final int CONCURRENT_CONNECTIONS = 14; //max 15
-	public static final int SENT_BUFFER_CAPACITY_PER_TASK = 300;
+	public static final int SENT_BUFFER_CAPACITY_PER_TASK = 5000; // 5000
 	public static final int MAX_PRODUCER_QUEUE_SIZE = SENT_BUFFER_CAPACITY_PER_TASK * (CONCURRENT_CONNECTIONS + 1);
-	public static final int BATCH_SIZE = 32;
+	public static final int BATCH_SIZE = 32; //32
 	
 	private final char[] keystorePassword;
 	private final APNSEnviroment apnsEnviroment;
@@ -101,5 +101,10 @@ public class APNConnectionManager implements PushContext {
 	@Override
 	public synchronized void pushRunnableWillTerminate() {
 		this.pushConnectionPool.submit(new PushRunnable(this.notificationQueue, this));
+	}
+
+	@Override
+	public synchronized void reportRejectedNotification(final String token, final RejectedNotificationReason reason) {
+		this.pushController.handleRejectedNotification(token, reason);
 	}
 }

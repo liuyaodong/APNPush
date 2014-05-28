@@ -10,4 +10,5 @@ public interface PushContext {
 	char[] getKeystorePassword();
 	EventLoopGroup getNioEventLoopGroup();
 	void pushRunnableWillTerminate();
+	void reportRejectedNotification(final String token, final RejectedNotificationReason reason);
 }

@@ -1,8 +1,11 @@
 package com.hxd.push;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.security.KeyStoreException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -21,6 +24,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 	private final APNConnectionManager apnConnectionManager;
 	private final APNLogEnvironment logEnvironment;
 	private final String payload;
+	private final BufferedWriter invalidTokenBufferedWriter;
 	
 	private PushManager(final APNConfiguration configuration, final APNLogEnvironment logEnvironment) {
 		this.logger.debug("configuration: " + configuration);
@@ -45,6 +49,15 @@ public class PushManager implements NotificationProducerDelegate, PushController
 			e.printStackTrace();
 		}
 		this.apnConnectionManager = apnConnectionManager;
+		
+		BufferedWriter bufferedWriter = null;
+		try {
+			bufferedWriter = new BufferedWriter(new FileWriter(new File(logEnvironment.getLogFilePath() + "invalidToken.txt"), true));
+		} catch (IOException e) {
+			e.printStackTrace();
+			System.out.println("Invalid tokens file writer initialization failed.");
+		}
+		this.invalidTokenBufferedWriter = bufferedWriter;
 	}
 	
 	private void doPush() {
@@ -58,6 +71,23 @@ public class PushManager implements NotificationProducerDelegate, PushController
 	@Override
 	public void apnConnectionManagerDidStop() {
 		this.logEnvironment.logUnsentTokens(this.apnConnectionManager.remainNotifications());
+		try {
+			this.invalidTokenBufferedWriter.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	@Override
+	public void handleRejectedNotification(final String token, final RejectedNotificationReason reason) {
+		if (reason.equals(RejectedNotificationReason.INVALID_TOKEN) || reason.equals(RejectedNotificationReason.INVALID_TOKEN_SIZE)) {
+			try {
+				this.invalidTokenBufferedWriter.write(token);
+				this.invalidTokenBufferedWriter.newLine();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+		}
 	}
 
 	@Override
@@ -67,7 +97,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 			messageString += " with exception: " + e.getMessage();
 		}
 		System.out.println(messageString);
-		System.out.println("All connection will be closed in 3 minutes.");
+		System.out.println("All connection will be closed in 10 minutes.");
 		ScheduledExecutorService scheduleToTerminate = Executors.newSingleThreadScheduledExecutor();
 		scheduleToTerminate.schedule(new Runnable() {
 			@Override
@@ -75,7 +105,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 				System.out.println("Try to terminate");
 				apnConnectionManager.stop();
 			}
-		}, 3 * 60, TimeUnit.SECONDS);
+		}, 10 * 60, TimeUnit.SECONDS);
 		scheduleToTerminate.shutdown();
 	}
 	
@@ -107,6 +137,8 @@ public class PushManager implements NotificationProducerDelegate, PushController
 		
 		new PushManager(configuration, logEnvironment).doPush();
 	}
+
+
 
 
 }

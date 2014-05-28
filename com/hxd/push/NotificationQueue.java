@@ -7,16 +7,12 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 // ThreadSafe
 // Defined the capacity for memory consideration.
 // Reclaimed notifications should not excess the capacity of the reclaimQueue, otherwise runtime exceptions will be raised.
 public class NotificationQueue implements NotificationEnqueue, NotificationReclaimableConsumeQueue {
 	private final BlockingQueue<SendablePushNotification> workingQueue;
 	private final BlockingQueue<SendablePushNotification> reclaimQueue;
-	private final Logger logger = LoggerFactory.getLogger(NotificationQueue.class);
 	
 	public NotificationQueue(final int capacity) {
 		this.workingQueue = new LinkedBlockingQueue<SendablePushNotification>(capacity);
@@ -49,13 +45,6 @@ public class NotificationQueue implements NotificationEnqueue, NotificationRecla
 	public void reclaimFailedNotification(SendablePushNotification notification) {
 		if (notification != null) {
 			this.reclaimQueue.add(notification);
-		}
-	}
-	
-	public void reportRejectedNotification(SendablePushNotification rejectedNotification) {
-		synchronized (this) {
-			//TODO write it to file
-			this.logger.warn("Rejected notification detected. Discard it");
 		}
 	}
 	
