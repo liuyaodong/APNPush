@@ -39,6 +39,7 @@ public class NotificationProducer implements Runnable {
 					SendablePushNotification notification = new SendablePushNotification(token, this.payload, null);
 					this.notificationEnqueue.put(notification);
 					this.notificationsProducted++;
+					System.out.print(String.format("Current notification id : %8d\r", notification.getIdentifier()));
 				} else {
 					this.logger.warn("Illegal token: " + token);
 				}
@@ -65,7 +66,7 @@ public class NotificationProducer implements Runnable {
 			e.printStackTrace();
 		} finally {
 			this.logger.info(this.notificationsProducted + " notifications enqueued!");
-			System.out.println(this.notificationsProducted + " notifications enqueued!");
+			System.out.println("\n" + this.notificationsProducted + " notifications enqueued!");
 			this.delegate.producerDidComplete(this, caughtException);
 		}
 		

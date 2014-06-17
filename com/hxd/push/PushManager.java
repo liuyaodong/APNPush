@@ -97,7 +97,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 			messageString += " with exception: " + e.getMessage();
 		}
 		System.out.println(messageString);
-		System.out.println("All connection will be closed in 10 minutes.");
+		System.out.println("All connection will be closed in 5 minutes.");
 		ScheduledExecutorService scheduleToTerminate = Executors.newSingleThreadScheduledExecutor();
 		scheduleToTerminate.schedule(new Runnable() {
 			@Override
@@ -105,7 +105,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 				System.out.println("Try to terminate");
 				apnConnectionManager.stop();
 			}
-		}, 10 * 60, TimeUnit.SECONDS);
+		}, 5 * 60, TimeUnit.SECONDS);
 		scheduleToTerminate.shutdown();
 	}
 	
@@ -122,6 +122,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 			configuration = new Gson().fromJson(jsonFileReader, APNConfiguration.class);
 		} catch (FileNotFoundException e2) {
 			e2.printStackTrace();
+			System.err.println("File not found, push manager abort!");
 		}
 		
 		if (configuration == null) {
@@ -135,7 +136,13 @@ public class PushManager implements NotificationProducerDelegate, PushController
 			return;
 		}
 		
-		new PushManager(configuration, logEnvironment).doPush();
+		System.out.println("Begin to push...");
+		try {
+			new PushManager(configuration, logEnvironment).doPush();
+		} catch (Throwable e) {
+			e.printStackTrace();
+		}
+		
 	}
 
 

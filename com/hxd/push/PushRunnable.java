@@ -129,7 +129,6 @@ public class PushRunnable implements Runnable {
 		@Override
 		public void channelWritabilityChanged(ChannelHandlerContext ctx) throws Exception {
 			super.channelWritabilityChanged(ctx);
-			logger.info("Channel Writability Changed, writable:" + ctx.channel().isWritable());
 			synchronized (channelWritabilityNotifier) {
 				if (ctx.channel().isWritable()) {
 					channelWritabilityNotifier.notify();
@@ -161,17 +160,22 @@ public class PushRunnable implements Runnable {
 		}
 	}
 	
-	//NOT Thread Safe: Should be private and called only once
-	private void sendNotification(final SendablePushNotification notification) throws InterruptedException {
+	// NOT Thread Safe: Should be private and called only once
+	// Return true if writing operation performed, false if not
+	private boolean sendNotification(final SendablePushNotification notification) throws InterruptedException {
 		if (notification == null) {
 			this.notificationsWriten.set(0);
 			this.channel.flush();
-			return;
+			return true;
 		}
 
 		synchronized (this.channelWritabilityNotifier) {
 			while (!this.channel.isWritable()) {
-				this.channelWritabilityNotifier.wait();
+				if (!this.channel.isActive() || this.requestTermination || Thread.currentThread().isInterrupted()) {
+					this.requestTermination = true;
+					return false;
+				}
+				this.channelWritabilityNotifier.wait(5 * 1000); // 5 seconds
 			}
 		}
 		
@@ -190,6 +194,8 @@ public class PushRunnable implements Runnable {
 			this.notificationsWriten.set(0);
 			this.channel.flush();
 		}
+		
+		return true;
 	}
 	
 	private void handlerNotificationIOError(final int failedNotificationIdentifier) {
@@ -244,7 +250,9 @@ public class PushRunnable implements Runnable {
 			this.logger.debug("pushRunnable ready to send" + this);
 			while (!this.requestTermination && !Thread.currentThread().isInterrupted()) {
 				SendablePushNotification notification = this.notificationQueue.pollNotification(PushRunnable.POLL_TIMEOUT, PushRunnable.MILLISECONDS_TIME_UNIT);
-				sendNotification(notification);
+				if (!sendNotification(notification)) {
+					this.notificationQueue.reclaimFailedNotification(notification);
+				}
 			}
 			this.logger.debug("pushRunnable finish sending" + this);
 			this.close();
@@ -254,7 +262,7 @@ public class PushRunnable implements Runnable {
 		} finally {
 			try {
 				this.logger.debug("pushRunnable finally close");
-				this.close();
+				this.close(); // Calling close() more than once is harmless
 			} catch (InterruptedException e) {
 				// Task is going to the end, so just ignore it.
 				this.logger.debug("exception happend in finnally");

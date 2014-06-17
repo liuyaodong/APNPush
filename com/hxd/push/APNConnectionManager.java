@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory;
 
 public class APNConnectionManager implements PushContext {
 	
-	public static final int CONCURRENT_CONNECTIONS = 14; //max 15
+	public static final int CONCURRENT_CONNECTIONS = 10; //max 15
 	public static final int SENT_BUFFER_CAPACITY_PER_TASK = 5000; // 5000
 	public static final int MAX_PRODUCER_QUEUE_SIZE = SENT_BUFFER_CAPACITY_PER_TASK * (CONCURRENT_CONNECTIONS + 1);
 	public static final int BATCH_SIZE = 32; //32
