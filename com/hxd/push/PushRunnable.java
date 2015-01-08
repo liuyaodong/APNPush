@@ -37,7 +37,7 @@ public class PushRunnable implements Runnable {
 	private static final TimeUnit MILLISECONDS_TIME_UNIT = TimeUnit.MILLISECONDS;
 	
 	private final NotificationReclaimableConsumeQueue notificationQueue;
-	private final PushContext context;
+	private final PushController controller;
 	private final Bootstrap bootstrap;
 	private final Logger logger = LoggerFactory.getLogger(PushRunnable.class);
 	private final SentNotificationCache notificationCache;
@@ -47,20 +47,20 @@ public class PushRunnable implements Runnable {
 	private Channel channel;
 	private AtomicInteger notificationsWriten = new AtomicInteger(0);
 	
-	public PushRunnable(final NotificationReclaimableConsumeQueue notificationQueue, final PushContext context) {
+	public PushRunnable(final NotificationReclaimableConsumeQueue notificationQueue, final PushController controller) {
 		this.notificationQueue = notificationQueue;
-		this.context = context;
+		this.controller = controller;
 		this.notificationCache = new SentNotificationCache(APNConnectionManager.SENT_BUFFER_CAPACITY_PER_TASK);
 		final PushRunnable pushRunnable = this;
 		this.bootstrap = new Bootstrap()
-							.group(context.getNioEventLoopGroup())
+							.group(controller.getNioEventLoopGroup())
 							.channel(NioSocketChannel.class)
 							.option(ChannelOption.SO_KEEPALIVE, true)
 							.handler(new ChannelInitializer<SocketChannel>() {
 			@Override
 			protected void initChannel(final SocketChannel channel) throws Exception {
 				final ChannelPipeline pipeline = channel.pipeline();
-				pipeline.addLast("ssl", SslHandlerUtil.createSslHandler(context.getKeyStore(), context.getKeystorePassword()));
+				pipeline.addLast("ssl", SslHandlerUtil.createSslHandler(controller.getKeyStore(), controller.getKeystorePassword()));
 				pipeline.addLast("decoder", new RejectedNotificationDecoder());
 				pipeline.addLast("encoder", new ApnsPushNotificationEncoder());
 				pipeline.addLast("handler", new ApnsErrorHandler(pushRunnable));
@@ -148,7 +148,7 @@ public class PushRunnable implements Runnable {
 	}
 	
 	private synchronized boolean connect() throws InterruptedException {
-		ChannelFuture future = this.bootstrap.connect(this.context.getApnsEnviroment().getApnsGatewayHost(), this.context.getApnsEnviroment().getApnsGatewayPort());
+		ChannelFuture future = this.bootstrap.connect(this.controller.getApnsEnviroment().getApnsGatewayHost(), this.controller.getApnsEnviroment().getApnsGatewayPort());
 		future.await();
 		if (future.isSuccess()) {
 			this.channel = future.channel();
@@ -209,7 +209,7 @@ public class PushRunnable implements Runnable {
 		ArrayList<SendablePushNotification> notifications = this.notificationCache.getAllNotificationsAfterIdentifierAndPurgeCache(rejectedNotification.getIdentifier());
 		if (notifications.size() > 0) {
 			SendablePushNotification rejectedOne = notifications.get(0);
-			this.context.reportRejectedNotification(rejectedOne.getToken(), rejectedNotification.getRejectionReason());
+			this.controller.reportRejectedNotification(rejectedOne.getToken(), rejectedNotification.getRejectionReason());
 			notifications.remove(0);
 			this.notificationQueue.reclaimFailedNotifications(notifications);
 			this.logger.debug(String.format("Hanlder rejected notification, reclaimed %d ", notifications.size()));
@@ -270,7 +270,7 @@ public class PushRunnable implements Runnable {
 			if (interrupted) {
 				Thread.currentThread().interrupt();
 			}
-			this.context.pushRunnableWillTerminate();
+			this.controller.pushRunnableWillTerminate();
 		}
 	}
 

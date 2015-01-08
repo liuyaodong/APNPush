@@ -16,7 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-public class APNConnectionManager implements PushContext {
+public class APNConnectionManager implements PushController {
 	
 	public static final int CONCURRENT_CONNECTIONS = 10; //max 15
 	public static final int SENT_BUFFER_CAPACITY_PER_TASK = 5000; // 5000
@@ -30,9 +30,10 @@ public class APNConnectionManager implements PushContext {
 	private final ExecutorService pushConnectionPool;
 	private final NotificationQueue notificationQueue;
 	private final KeyStore keyStore;
-	private final PushController pushController;
 	
-	public APNConnectionManager(APNSEnviroment apnsEnviroment, final String apsPKCS12FilePath, final String password, final PushController pushController) throws KeyStoreException {
+	private PushControllerDelegate delegate;
+	
+	public APNConnectionManager(APNSEnviroment apnsEnviroment, final String apsPKCS12FilePath, final String password, final PushControllerDelegate delegate) throws KeyStoreException {
 		this.apnsEnviroment = apnsEnviroment;
 		this.keystorePassword = password.toCharArray();
 		this.keyStore = KeyStore.getInstance("PKCS12");
@@ -40,7 +41,7 @@ public class APNConnectionManager implements PushContext {
 		this.pushConnectionPool = Executors.newFixedThreadPool(APNConnectionManager.CONCURRENT_CONNECTIONS);
 		//Queue size should bigger than the sum of all task buffered notifications.
 		this.notificationQueue = new NotificationQueue(APNConnectionManager.MAX_PRODUCER_QUEUE_SIZE);
-		this.pushController = pushController;
+		this.delegate = delegate;
 		
 		try {
 			FileInputStream keystoreInputStream;
@@ -69,12 +70,17 @@ public class APNConnectionManager implements PushContext {
 		return nioEventLoopGroup;
 	}
 
-	public NotificationEnqueue getNotificationEnqueue() {
-		return this.notificationQueue;
+	
+	public Collection<SendablePushNotification> getRemainNotifications() {
+		return this.notificationQueue.remainNotifications();
 	}
 	
-	public Collection<SendablePushNotification> remainNotifications() {
-		return this.notificationQueue.remainNotifications();
+	public synchronized void setPushControllerDelegate(final PushControllerDelegate delegate) {
+		this.delegate = delegate;
+	}
+	
+	public synchronized PushControllerDelegate getPushControllerDelegate() {
+		return this.delegate;
 	}
 
 	public synchronized void start() {
@@ -94,8 +100,15 @@ public class APNConnectionManager implements PushContext {
 	    		this.pushConnectionPool.shutdownNow();
 	    		Thread.currentThread().interrupt();
 	    } finally {
-	    		this.pushController.apnConnectionManagerDidStop();
+	    		this.delegate.pushControllerDidStop();
 	    }
+	}
+	
+	public void doPush(String token, String payload) throws InterruptedException {
+		if (token.length() == 64) {
+			SendablePushNotification notification = new SendablePushNotification(token, payload, null);
+			this.notificationQueue.put(notification);
+		}
 	}
 
 	@Override
@@ -105,6 +118,6 @@ public class APNConnectionManager implements PushContext {
 
 	@Override
 	public synchronized void reportRejectedNotification(final String token, final RejectedNotificationReason reason) {
-		this.pushController.handleRejectedNotification(token, reason);
+		this.delegate.handleRejectedNotification(token, reason);
 	}
 }

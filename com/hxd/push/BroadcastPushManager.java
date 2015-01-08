@@ -18,15 +18,15 @@ import org.slf4j.LoggerFactory;
 import com.google.gson.Gson;
 import com.hxd.push.APNLogEnvironment.APNLogLevel;
 
-public class PushManager implements NotificationProducerDelegate, PushController {
-	private final Logger logger = LoggerFactory.getLogger(PushManager.class);
+public class BroadcastPushManager implements NotificationProducerDelegate, PushControllerDelegate {
+	private final Logger logger = LoggerFactory.getLogger(BroadcastPushManager.class);
 	private final APNConfiguration configuration;
-	private final APNConnectionManager apnConnectionManager;
+	private final PushController pushController;
 	private final APNLogEnvironment logEnvironment;
 	private final String payload;
 	private final BufferedWriter invalidTokenBufferedWriter;
 	
-	private PushManager(final APNConfiguration configuration, final APNLogEnvironment logEnvironment) {
+	private BroadcastPushManager(final APNConfiguration configuration, final APNLogEnvironment logEnvironment) {
 		this.logger.debug("configuration: " + configuration);
 		this.configuration = configuration;
 		this.logEnvironment = logEnvironment;
@@ -39,16 +39,16 @@ public class PushManager implements NotificationProducerDelegate, PushController
 		this.payload = payloadBuilder.build();
 		this.logger.debug("payload: " + payload);
 		
-		APNConnectionManager apnConnectionManager = null;
+		APNConnectionManager pushController = null;
 		try {
-			apnConnectionManager = new APNConnectionManager(this.configuration.isDebug() ? APNSEnviroment.getSandboxEnvironment() : APNSEnviroment.getProductionEnvironment(),
+			pushController = new APNConnectionManager(this.configuration.isDebug() ? APNSEnviroment.getSandboxEnvironment() : APNSEnviroment.getProductionEnvironment(),
 									this.configuration.getPkcs12(),
 									this.configuration.getPassword(),
 									this);
 		} catch (KeyStoreException e) {
 			e.printStackTrace();
 		}
-		this.apnConnectionManager = apnConnectionManager;
+		this.pushController = pushController;
 		
 		BufferedWriter bufferedWriter = null;
 		try {
@@ -61,16 +61,16 @@ public class PushManager implements NotificationProducerDelegate, PushController
 	}
 	
 	private void doPush() {
-		this.apnConnectionManager.start();
-		NotificationProducer producer = new NotificationProducer(apnConnectionManager.getNotificationEnqueue(), this.configuration.getTokenFile(), this.payload, this);
+		this.pushController.start();
+		BroadcastNotificationProducer producer = new BroadcastNotificationProducer(pushController, this.configuration.getTokenFile(), this.payload, this);
 		ExecutorService producerService = Executors.newSingleThreadExecutor();
 		producerService.submit(producer);
 		producerService.shutdown();
 	}
 	
 	@Override
-	public void apnConnectionManagerDidStop() {
-		this.logEnvironment.logUnsentTokens(this.apnConnectionManager.remainNotifications());
+	public void pushControllerDidStop() {
+		this.logEnvironment.logUnsentTokens(this.pushController.getRemainNotifications());
 		try {
 			this.invalidTokenBufferedWriter.close();
 		} catch (IOException e) {
@@ -91,7 +91,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 	}
 
 	@Override
-	public void producerDidComplete(NotificationProducer producer, Exception e) {
+	public void producerDidComplete(BroadcastNotificationProducer producer, Exception e) {
 		String messageString = "Tokens have been processed";
 		if (e != null) {
 			messageString += " with exception: " + e.getMessage();
@@ -103,7 +103,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 			@Override
 			public void run() {
 				System.out.println("Try to terminate");
-				apnConnectionManager.stop();
+				pushController.stop();
 			}
 		}, 5 * 60, TimeUnit.SECONDS);
 		scheduleToTerminate.shutdown();
@@ -138,7 +138,7 @@ public class PushManager implements NotificationProducerDelegate, PushController
 		
 		System.out.println("Begin to push...");
 		try {
-			new PushManager(configuration, logEnvironment).doPush();
+			new BroadcastPushManager(configuration, logEnvironment).doPush();
 		} catch (Throwable e) {
 			e.printStackTrace();
 		}

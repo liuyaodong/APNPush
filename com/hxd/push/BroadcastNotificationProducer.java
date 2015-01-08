@@ -10,17 +10,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-public class NotificationProducer implements Runnable {
+public class BroadcastNotificationProducer implements Runnable {
 	private final String tokenFilePath;
-	private final NotificationEnqueue notificationEnqueue;
+	private final PushController pushController;
 	private final String payload;
 	private final NotificationProducerDelegate delegate;
-	private final Logger logger = LoggerFactory.getLogger(NotificationProducer.class);
+	private final Logger logger = LoggerFactory.getLogger(BroadcastNotificationProducer.class);
 	
 	private long notificationsProducted = 0;
 
-	public NotificationProducer(final NotificationEnqueue notificationEnqueue, final String tokenFilePath, final String payload, final NotificationProducerDelegate delegate) {
-		this.notificationEnqueue = notificationEnqueue;
+	public BroadcastNotificationProducer(final PushController pushController, final String tokenFilePath, final String payload, final NotificationProducerDelegate delegate) {
+		this.pushController = pushController;
 		this.tokenFilePath = tokenFilePath;
 		this.payload = payload;
 		this.delegate = delegate;
@@ -36,10 +36,8 @@ public class NotificationProducer implements Runnable {
 			while( (line = bufferedReader.readLine()) != null ) {
 				String token = line.trim().replace(" ", "");
 				if (token.length() == 64) {
-					SendablePushNotification notification = new SendablePushNotification(token, this.payload, null);
-					this.notificationEnqueue.put(notification);
+					this.pushController.doPush(token, this.payload);
 					this.notificationsProducted++;
-					System.out.print(String.format("Current notification id : %8d\r", notification.getIdentifier()));
 				} else {
 					this.logger.warn("Illegal token: " + token);
 				}
